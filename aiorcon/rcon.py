@@ -2,8 +2,12 @@ import asyncio
 import logging
 from aiorcon.exceptions import RCONAuthenticationError, RCONError, RCONClosedError
 from aiorcon.protocol import RCONProtocol
+from asyncio.exceptions import TimeoutError
+
 log = logging.getLogger(__name__)
 
+class UnreachableRCONServer(Exception):
+    pass
 
 class RCON:
     @classmethod
@@ -19,6 +23,7 @@ class RCON:
         rcon._auto_reconnect_cb = auto_reconnect_cb
         rcon._reconnecting = False
         rcon._closing = False
+        rcon._timeout = timeout
 
         def connection_lost():
             if rcon._auto_reconnect_attempts and not rcon._closing:
@@ -33,9 +38,12 @@ class RCON:
         return rcon
 
     async def _connect(self):
-        _, protocol = await self._loop.create_connection(self.protocol_factory, self.host, self.port)
-        await protocol.authenticate()
-        self.protocol = protocol
+        try:
+          _, protocol = await asyncio.wait_for(self._loop.create_connection(self.protocol_factory, self.host, self.port), timeout=self._timeout)
+          await protocol.authenticate()
+          self.protocol = protocol
+        except TimeoutError:
+          raise UnreachableRCONServer("could not connect to {}:{}".format(self.host, self.port))
 
     async def _reconnect(self):
         attempt = 0
